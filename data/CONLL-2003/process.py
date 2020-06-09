@@ -13,7 +13,7 @@ def read_file(filename):
         print("Processing...")
         for line in tqdm(f):
             if (len(line) == 0 or line.startswith('-DOCSTART') or
-                    line[0] == "\n"):
+                    line[0] == "\n" or line[-2:] == "O\n"):
                 if len(sentence) > 0:
                     sentences.append(sentence)
                     sentence = []
@@ -55,6 +55,7 @@ def process(sentences):
 if __name__ == "__main__":
     sentences = read_file("concat.txt")
     inputs, labels = process(sentences)
+    print(labels)
     save_dict = {
         "inputs": inputs,
         "labels": labels
