@@ -13,7 +13,7 @@ def read_file(filename):
         print("Processing...")
         for line in tqdm(f):
             if (len(line) == 0 or line.startswith('-DOCSTART') or
-                    line[0] == "\n" or line[-2:] == "O\n"):
+                    line[0] == "\n"):
                 if len(sentence) > 0:
                     sentences.append(sentence)
                     sentence = []
@@ -40,14 +40,15 @@ def process(sentences):
         for word, tag in sentence:
             text.append(word)
             end = start + len(word)
-            input_dict = {
-                "start": start,
-                "end": end,
-                "label": tag,
-                "text": word
-            }
+            if tag != "O":
+                input_dict = {
+                    "start": start,
+                    "end": end,
+                    "label": tag,
+                    "text": word
+                }
+                input_dicts.append(input_dict)
             start = end + 1
-            input_dicts.append(input_dict)
         inputs.append(" ".join(text))
         labels.append(input_dicts)
     return inputs, labels
@@ -55,7 +56,6 @@ def process(sentences):
 if __name__ == "__main__":
     sentences = read_file("concat.txt")
     inputs, labels = process(sentences)
-    print(labels)
     save_dict = {
         "inputs": inputs,
         "labels": labels
