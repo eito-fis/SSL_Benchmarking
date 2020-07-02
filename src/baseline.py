@@ -103,36 +103,36 @@ if __name__ == "__main__":
 		print("RoBERTa selected!")
 		base_model = RoBERTa
 		algo = None if not args.algo else args.algo.lower()
-		if algo == "vat":
-			print("Training VAT...")
-			model_fn = lambda: VATLabeler(base_model=base_model,
-								 crf_sequence_labeling=args.crf,
-								 n_epochs=args.epochs,
-								 tensorboard_folder="tensorboard/vat",
-								 val_interval=2,
-								 val_size=0,
-								 low_memory_mode=args.low_memory)
-			fit_fn = lambda m: m.fit(trainX, Us=unlabeledX, Y=trainY,
-							update_hook=hooks)
-		elif algo == "pseudo":
-			print("Training Pseudo Labels...")
-			model_fn = lambda: PseudoLabeler(base_model=base_model,
-									crf_sequence_labeling=args.crf,
-									n_epochs=args.epochs,
-									tensorboard_folder="tensorboard/pseudo",
-									val_interval=2,
-									val_size=0,
-									low_memory_mode=args.low_memory)
-			fit_fn = lambda m: m.fit(trainX, Us=unlabeledX, Y=trainY,
-							update_hook=hooks)
-		else:
-			print("Training baseline...")
-			model_fn = lambda: SequenceLabeler(base_model=base_model,
-									  crf_sequence_labeling=args.crf,
-									  n_epochs=args.epochs,
-									  early_stopping_steps=None,
-									  low_memory_mode=args.low_memory)
-			fit_fn = lambda m: m.fit(trainX, trainY, update_hook=hooks)
+    if algo == "vat":
+        print("Training VAT...")
+        model_fn = lambda: VATLabeler(base_model=base_model,
+                             crf_sequence_labeling=args.crf,
+                             n_epochs=args.epochs,
+                             tensorboard_folder="tensorboard/vat",
+                             val_interval=2,
+                             val_size=0,
+                             low_memory_mode=args.low_memory)
+        fit_fn = lambda m: m.fit(trainX, Us=unlabeledX, Y=trainY,
+                        update_hook=hooks)
+    elif algo == "pseudo":
+        print("Training Pseudo Labels...")
+        model_fn = lambda: PseudoLabeler(base_model=base_model,
+                                crf_sequence_labeling=args.crf,
+                                n_epochs=args.epochs,
+                                tensorboard_folder="tensorboard/pseudo",
+                                val_interval=2,
+                                val_size=0,
+                                low_memory_mode=args.low_memory)
+        fit_fn = lambda m: m.fit(trainX, Us=unlabeledX, Y=trainY,
+                        update_hook=hooks)
+    else:
+        print("Training baseline...")
+        model_fn = lambda: SequenceLabeler(base_model=base_model,
+                                  crf_sequence_labeling=args.crf,
+                                  n_epochs=args.epochs,
+                                  early_stopping_steps=None,
+                                  low_memory_mode=args.low_memory)
+        fit_fn = lambda m: m.fit(trainX, trainY, update_hook=hooks)
 
 	all_averages = []
 	for i in range(args.runs):
