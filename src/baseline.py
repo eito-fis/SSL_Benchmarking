@@ -18,6 +18,11 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def str2none(v):
+    if v is None or v.lower() is "none":
+        return None
+    return v
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Train SSL')
     parser.add_argument('--data',
@@ -61,7 +66,7 @@ if __name__ == "__main__":
                      default=4)
 
     parser.add_argument('--class_weights',
-                     type=str,
+                     type=str2none,
                      default=None,
                      help="""Class weighting to use. Options are (log, linear,
                      sqrt).(default: None)""")
@@ -118,7 +123,7 @@ if __name__ == "__main__":
         vat_e = args.e,
         vat_loss_coef = args.loss_coef,
         pseudo_thresh = args.thresh,
-        class_weights = None if not args.class_weights else args.class_weights
+        class_weights = args.class_weights
     )
 
     if args.wandb:
