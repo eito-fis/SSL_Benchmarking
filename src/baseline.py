@@ -3,7 +3,7 @@ import argparse
 from sklearn.model_selection import train_test_split
 import numpy as np
 
-from finetune import SequenceLabeler
+from finetune import SequenceLabeler, MaskedLanguageModel
 from finetune.target_models.semi_suprevised import VATLabeler, PseudoLabeler
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
@@ -30,7 +30,7 @@ if __name__ == "__main__":
                      type=str,
                      default=None,
                      help="""What algorithm to train. Current options are
-                     (VAT, Pseudo).  Unrecognized strs or None trains a
+                     (VAT, Pseudo, MLM).  Unrecognized strs or None trains a
                      Sequence Labeler. (default: None)""")
     parser.add_argument('--base_model',
                      type=str,
@@ -60,6 +60,11 @@ if __name__ == "__main__":
                      type=int,
                      default=4)
 
+    parser.add_argument('--class_weights',
+                     type=str,
+                     default=None,
+                     help="""Class weighting to use. Options are (log, linear,
+                     sqrt).(default: None)""")
     parser.add_argument('--crf',
                      type=str2bool,
                      default=False,
@@ -72,6 +77,10 @@ if __name__ == "__main__":
                      type=str2bool,
                      default=False,
                      help="Whether or not to use WandB logging. (default: False)")
+    parser.add_argument('--wandb_name',
+                     type=str,
+                     default=None,
+                     help="WandB run name. (default: None)")
 
     # VAT args
     parser.add_argument('--preturb_embed',
@@ -108,15 +117,18 @@ if __name__ == "__main__":
         vat_k = args.k,
         vat_e = args.e,
         vat_loss_coef = args.loss_coef,
-        pseudo_thresh = args.thresh
+        pseudo_thresh = args.thresh,
+        class_weights = None if not args.class_weights else args.class_weights
     )
 
     if args.wandb:
         import wandb
         from wandb.tensorflow import WandbHook
         wandb.init(project="ssl-benchmarks",
+                   name=args.wandb_name,
                    sync_tensorboard=True,
                    config=config)
+        wandb.config.dataset = args.data.split('/')[-1]
         hooks = WandbHook
     else:
         hooks = None
@@ -160,33 +172,46 @@ if __name__ == "__main__":
         print("RoBERTa selected!")
         base_model = RoBERTa
 
-    if args.algo is None:
+    algo = None if not args.algo else args.algo.lower()
+    if algo is None or algo is "roberta":
         print("Training baseline...")
-        model_fn = lambda: SequenceLabeler(base_model=base_model,
-                                  crf_sequence_labeling=args.crf,
-                                  n_epochs=args.epochs,
-                                  early_stopping_steps=None,
-                                  low_memory_mode=args.low_memory)
-        fit_fn = lambda m: m.fit(trainX, trainY, update_hook=hooks)
-    else:
-        algo = args.algo.lower()
-        if algo == "vat":
-            print("Training VAT...")
-            base_algo = VATLabeler
-        elif algo == "pseudo":
-            print("Training Pseudo Labels...")
-            base_algo = PseudoLabeler
-        model_fn = lambda: base_algo(base_model=base_model, **config)
-        fit_fn = lambda m: m.fit(trainX,
-                                 Us=unlabeledX,
-                                 Y=trainY,
-                                 update_hook=hooks)
+        model = SequenceLabeler(base_model=base_model,
+                                crf_sequence_labeling=args.crf,
+                                n_epochs=args.epochs,
+                                early_stopping_steps=None,
+                                low_memory_mode=args.low_memory)
+        model.fit(trainX, trainY, update_hook=hooks)
+    elif algo == "vat":
+        print("Training VAT...")
+        model = VATLabeler(base_model=base_model, **config)
+        model.fit(trainX,
+                  Us=unlabeledX,
+                  Y=trainY,
+                  update_hook=hooks)
+    elif algo == "pseudo":
+        print("Training Pseudo Labels...")
+        model = PseudoLabeler(base_model=base_model, **config)
+        model.fit(trainX,
+                  Us=unlabeledX,
+                  Y=trainY,
+                  update_hook=hooks)
+    elif algo == "mlm":
+        print("Training Masked Language Model...")
+        model = MaskedLanguageModel(base_model=base_model, **config)
+        model.fit(unlabeledX)
+        save_file = "bert/ssl_mlm.jl" 
+        model.create_base_model(save_file)
 
-    all_averages = []
-    # for i in range(args.runs):
-        # print(f"Starting run {i + 1} of {args.runs}...")
-    model = model_fn()
-    fit_fn(model)
+        model = SequenceLabeler(base_model=base_model,
+                                base_model_path=save_file,
+                                crf_sequence_labeling=args.crf,
+                                n_epochs=args.epochs,
+                                early_stopping_steps=None,
+                                low_memory_mode=args.low_memory,
+                                batch_size=args.batch_size)
+        model.fit(trainX, trainY, update_hook=hooks)
+
+
     predictions = model.predict(testX)
     report, averages = annotation_report(testY, predictions)
     print(report)
@@ -200,21 +225,7 @@ if __name__ == "__main__":
         wandb.run.summary["Exact Micro F1"] = f1_exact_micro
         wandb.run.summary["Token Macro F1"] = f1_token_macro
         wandb.run.summary["Exact Macro F1"] = f1_exact_macro
-        # wandb.log({
-        #     "Token Micro F1": f1_token_micro,
-        #     "Token Macro F1": f1_token_macro,
-        #     "Exact Micro F1": f1_exact_micro,
-        #     "Exact Macro F1": f1_exact_macro,
-        # })
-
-    # if args.runs > 1:
-    #     all_averages = np.array(all_averages)
-    #     final_averages = np.mean(all_averages, axis=0)
-    #     final_std = np.std(all_averages, axis=0)
-    #     final_max = np.amax(all_averages, axis=0)
-    #     final_min = np.amin(all_averages, axis=0)
-    #     format_fn = lambda l: [f"{x:.2f}" for x in l]
-    #     print(f"Averages: {format_fn(final_averages)}")
-    #     print(f"Standard Deviation: {format_fn(final_std)}")
-    #     print(f"Maxs: {format_fn(final_max)}")
-    #     print(f"Mins: {format_fn(final_min)}")
+    print(f"Token Micro F1: {f1_token_micro}") 
+    print(f"Exact Micro F1: {f1_exact_micro}") 
+    print(f"Token Macro F1: {f1_token_macro}") 
+    print(f"Exact Macro F1: {f1_exact_macro}") 
