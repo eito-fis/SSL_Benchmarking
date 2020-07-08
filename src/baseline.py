@@ -2,9 +2,10 @@ import pickle
 import argparse
 from sklearn.model_selection import train_test_split
 import numpy as np
+import time
 
 from finetune import SequenceLabeler, MaskedLanguageModel
-from finetune.target_models.semi_suprevised import VATLabeler, PseudoLabeler
+from finetune.target_models.semi_suprevised import VATLabeler, PseudoLabeler, MeanTeacherLabeler
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
 
@@ -19,7 +20,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def str2none(v):
-    if v is None or v.lower() is "none":
+    if v is None or v.lower() == "none":
         return None
     return v
 
@@ -35,8 +36,8 @@ if __name__ == "__main__":
                      type=str,
                      default=None,
                      help="""What algorithm to train. Current options are
-                     (VAT, Pseudo, MLM).  Unrecognized strs or None trains a
-                     Sequence Labeler. (default: None)""")
+                     (VAT, Pseudo, MLM, Mean).  Unrecognized strs or None
+                     trains a Sequence Labeler. (default: None)""")
     parser.add_argument('--base_model',
                      type=str,
                      default=None,
@@ -200,11 +201,21 @@ if __name__ == "__main__":
                   Us=unlabeledX,
                   Y=trainY,
                   update_hook=hooks)
+    elif algo == "mean":
+        print("Training Mean Teacher...")
+        model = MeanTeacherLabeler(base_model=base_model, **config)
+        model.fit(trainX,
+                  Us=unlabeledX,
+                  Y=trainY,
+                  update_hook=hooks)
     elif algo == "mlm":
         print("Training Masked Language Model...")
+        class_weights = config["class_weights"]
+        config["class_weights"] = None
         model = MaskedLanguageModel(base_model=base_model, **config)
         model.fit(unlabeledX)
         save_file = "bert/ssl_mlm.jl" 
+        save_file = save_file + str(int(time.time())) 
         model.create_base_model(save_file)
 
         model = SequenceLabeler(base_model=base_model,
@@ -213,7 +224,8 @@ if __name__ == "__main__":
                                 n_epochs=args.epochs,
                                 early_stopping_steps=None,
                                 low_memory_mode=args.low_memory,
-                                batch_size=args.batch_size)
+                                batch_size=args.batch_size,
+                                class_weights=class_weights)
         model.fit(trainX, trainY, update_hook=hooks)
 
 
