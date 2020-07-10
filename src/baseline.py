@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 from finetune import SequenceLabeler, MaskedLanguageModel
-from finetune.target_models.semi_suprevised import VATLabeler, PseudoLabeler, MeanTeacherLabeler
+from finetune.target_models.semi_suprevised import VATLabeler, PseudoLabeler, MeanTeacherLabeler, ICTLabeler
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
 
@@ -31,12 +31,20 @@ if __name__ == "__main__":
                      default="data/CONLL-2003/processed.pickle",
                      help="""Pickle file to load data from. (default:
                      data/CONLL-2003/processed.pickle""")
+    parser.add_argument('--wandb',
+                     type=str2bool,
+                     default=False,
+                     help="Whether or not to use WandB logging. (default: False)")
+    parser.add_argument('--wandb_name',
+                     type=str,
+                     default=None,
+                     help="WandB run name. (default: None)")
 
     parser.add_argument('--algo',
                      type=str,
                      default=None,
                      help="""What algorithm to train. Current options are
-                     (VAT, Pseudo, MLM, Mean).  Unrecognized strs or None
+                     (vat, pseudo, mlm, mean, ict).  Unrecognized strs or None
                      trains a Sequence Labeler. (default: None)""")
     parser.add_argument('--base_model',
                      type=str,
@@ -44,6 +52,25 @@ if __name__ == "__main__":
                      help="""What basemodel to train. Current options are
                      (RoBERTa, TCN).  Unrecognized strs or None trains a
                      RoBERTa model. (default: None)""")
+
+    parser.add_argument('--class_weights',
+                     type=str2none,
+                     default=None,
+                     help="""Class weighting to use. Options are (log, linear,
+                     sqrt).(default: None)""")
+    parser.add_argument('--crf',
+                     type=str2bool,
+                     default=False,
+                     help="Whether or not to use a CRF. (default: False)")
+    parser.add_argument('--low_memory',
+                     type=str2bool,
+                     default=False,
+                     help="Whether or not to use low memory mode. (default: False)")
+    parser.add_argument('--iterate_unlabeled',
+                     type=str2bool,
+                     default=True,
+                     help="""Whether or not to count epochs over unlabeled data.
+                        (default: True)""")
 
     parser.add_argument('--data_usage',
                      type=int,
@@ -59,34 +86,19 @@ if __name__ == "__main__":
                      type=int,
                      default=1,
                      help="Runs to average over(default: 1)")
+
     parser.add_argument('--batch_size',
                      type=int,
                      default=2)
     parser.add_argument('--u_batch_size',
                      type=int,
                      default=4)
-
-    parser.add_argument('--class_weights',
-                     type=str2none,
-                     default=None,
-                     help="""Class weighting to use. Options are (log, linear,
-                     sqrt).(default: None)""")
-    parser.add_argument('--crf',
-                     type=str2bool,
-                     default=False,
-                     help="Whether or not to use a CRF. (default: False)")
-    parser.add_argument('--low_memory',
-                     type=str2bool,
-                     default=False,
-                     help="Whether or not to use low memory mode. (default: False)")
-    parser.add_argument('--wandb',
-                     type=str2bool,
-                     default=False,
-                     help="Whether or not to use WandB logging. (default: False)")
-    parser.add_argument('--wandb_name',
-                     type=str,
-                     default=None,
-                     help="WandB run name. (default: None)")
+    parser.add_argument('--loss_coef',
+                        type=float,
+                        default=0.3)
+    parser.add_argument('--decay',
+                        type=float,
+                        default=0.999)
 
     # VAT args
     parser.add_argument('--preturb_embed',
@@ -101,14 +113,15 @@ if __name__ == "__main__":
     parser.add_argument('--e',
                         type=float,
                         default=0.0002)
-    parser.add_argument('--loss_coef',
-                        type=float,
-                        default=0.3)
 
     # Pseudo args
     parser.add_argument('--thresh',
                         type=float,
                         default=0.99)
+    # ICT args
+    parser.add_argument('--alpha',
+                        type=float,
+                        default=0.2)
 
     args = parser.parse_args()
 
@@ -116,14 +129,17 @@ if __name__ == "__main__":
         crf_sequence_labeling = args.crf,
         n_epochs = args.epochs,
         low_memory_mode = args.low_memory,
+        iterate_unlabeled=args.iterate_unlabeled,
         batch_size = args.batch_size,
         u_batch_size = args.u_batch_size,
+        ssl_loss_coef = args.loss_coef,
+        ema_decay = args.decay,
         vat_preturb_embed = args.preturb_embed,
         vat_top_k = args.top_k if (args.top_k and args.top_k > 0) else None,
         vat_k = args.k,
         vat_e = args.e,
-        vat_loss_coef = args.loss_coef,
         pseudo_thresh = args.thresh,
+        ict_alpha = args.alpha,
         class_weights = args.class_weights
     )
 
@@ -178,8 +194,20 @@ if __name__ == "__main__":
         print("RoBERTa selected!")
         base_model = RoBERTa
 
+    algo_2_model = {
+        "vat": VATLabeler,
+        "pseudo": PseudoLabeler,
+        "mean": MeanTeacherLabeler,
+        "ict": ICTLabeler
+    }
     algo = None if not args.algo else args.algo.lower()
-    if algo is None or algo is "roberta":
+    if algo in algo_2_model:
+        model = algo_2_model[algo](base_model=base_model, **config)
+        model.fit(trainX,
+                  Us=unlabeledX,
+                  Y=trainY,
+                  update_hook=hooks)
+    elif algo is None or algo is "roberta":
         print("Training baseline...")
         model = SequenceLabeler(base_model=base_model,
                                 crf_sequence_labeling=args.crf,
@@ -187,27 +215,6 @@ if __name__ == "__main__":
                                 early_stopping_steps=None,
                                 low_memory_mode=args.low_memory)
         model.fit(trainX, trainY, update_hook=hooks)
-    elif algo == "vat":
-        print("Training VAT...")
-        model = VATLabeler(base_model=base_model, **config)
-        model.fit(trainX,
-                  Us=unlabeledX,
-                  Y=trainY,
-                  update_hook=hooks)
-    elif algo == "pseudo":
-        print("Training Pseudo Labels...")
-        model = PseudoLabeler(base_model=base_model, **config)
-        model.fit(trainX,
-                  Us=unlabeledX,
-                  Y=trainY,
-                  update_hook=hooks)
-    elif algo == "mean":
-        print("Training Mean Teacher...")
-        model = MeanTeacherLabeler(base_model=base_model, **config)
-        model.fit(trainX,
-                  Us=unlabeledX,
-                  Y=trainY,
-                  update_hook=hooks)
     elif algo == "mlm":
         print("Training Masked Language Model...")
         class_weights = config["class_weights"]
@@ -221,7 +228,7 @@ if __name__ == "__main__":
         model = SequenceLabeler(base_model=base_model,
                                 base_model_path=save_file,
                                 crf_sequence_labeling=args.crf,
-                                n_epochs=args.epochs,
+                                n_epochs=10,
                                 early_stopping_steps=None,
                                 low_memory_mode=args.low_memory,
                                 batch_size=args.batch_size,
