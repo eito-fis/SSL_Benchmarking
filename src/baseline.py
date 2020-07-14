@@ -214,7 +214,7 @@ if __name__ == "__main__":
              sync_tensorboard=True,
              config=config)
         wandb.config.dataset = args.data.split('/')[-1]
-        wandb.config.algo = algo
+        # wandb.config.algo = algo
         wandb.config.batch_ratio = args.batch_ratio
         wandb.config.data_usage = data_usage
         hooks = WandbHook
