@@ -90,13 +90,15 @@ if __name__ == "__main__":
                      type=int,
                      default=2,
                      help="Epochs to train for. (default: 2)")
-    parser.add_argument('--runs',
+    parser.add_argument('--train_steps',
                      type=int,
-                     default=1,
-                     help="Runs to average over(default: 1)")
+                     default=None,
+                     help="""The amount of training steps to take. Takes
+                        precedent over epochs if set. (default: None)""")
     parser.add_argument("--batch_ratio",
                      type=float,
                      default=None)
+
 
     parser.add_argument('--batch_size',
                      type=int,
@@ -204,7 +206,19 @@ if __name__ == "__main__":
             # How many suprevised epochs there are in an unsuprevised epoch,
             # accounting for different batch_ratios
             epoch_multiplier = u_s_len_ratio * args.batch_ratio
-            config["n_epochs"] = int(config["n_epochs"] * epoch_multiplier)
+            config["n_epochs"] = round(config["n_epochs"] * epoch_multiplier)
+
+    # If train steps are passed, convert to epochs for finetune
+    if args.train_steps:
+        if args.iterate_unlabeled:
+            steps_per_epoch = len(unlabeledX)
+        else:
+            steps_per_epoch = len(trainX)
+        n_epochs = round(args.train_steps / steps_per_epoch)
+        real_train_steps = int(steps_per_epoch) * n_epochs
+        print(f"{args.train_steps} trains steps became {n_epochs} epochs")
+        print(f"Actual train steps: {real_train_steps}")
+        config["n_epochs"] = n_epochs
 
     if args.wandb:
         import wandb
@@ -214,9 +228,12 @@ if __name__ == "__main__":
              sync_tensorboard=True,
              config=config)
         wandb.config.dataset = args.data.split('/')[-1]
-        # wandb.config.algo = algo
+        wandb.config.algo = algo
         wandb.config.batch_ratio = args.batch_ratio
         wandb.config.data_usage = data_usage
+        if args.train_steps:
+            wandb.config.train_steps = args.train_steps
+            wandb.config.real_train_steps = real_train_steps
         hooks = WandbHook
     else:
         hooks = None
@@ -237,11 +254,13 @@ if __name__ == "__main__":
         "ict": ICTLabeler
     }
     if algo in algo_2_model:
-        model = algo_2_model[algo](base_model=base_model, **config)
+        model = algo_2_model[algo](base_model=base_model, **config,
+                                   tensorboard_folder="tensorboard/testing",
+                                   val_interval=1)
         model.fit(trainX,
-            Us=unlabeledX,
-            Y=trainY,
-            update_hook=hooks)
+                  Us=unlabeledX,
+                  Y=trainY,
+                  update_hook=hooks)
     elif algo is None or algo is "roberta":
         print("Training baseline...")
         model = SequenceLabeler(base_model=base_model,
