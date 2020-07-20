@@ -157,7 +157,7 @@ if __name__ == "__main__":
         pseudo_thresh = args.thresh,
         ict_alpha = args.alpha,
         class_weights = args.class_weights,
-        tsa_method=args.tsa_method
+        tsa_method=args.tsa_method,
     )
 
     filename = args.data
@@ -228,7 +228,6 @@ if __name__ == "__main__":
              sync_tensorboard=True,
              config=config)
         wandb.config.dataset = args.data.split('/')[-1]
-        wandb.config.algo = algo
         wandb.config.batch_ratio = args.batch_ratio
         wandb.config.data_usage = data_usage
         if args.train_steps:
@@ -275,6 +274,7 @@ if __name__ == "__main__":
         print("Training Masked Language Model...")
         class_weights = config["class_weights"]
         config["class_weights"] = None
+        config["iterate_unlabeled"] = False
         model = MaskedLanguageModel(base_model=base_model, **config)
         mlmX = unlabeledX + trainX
         model.fit(mlmX)
