@@ -158,6 +158,8 @@ if __name__ == "__main__":
         ict_alpha = args.alpha,
         class_weights = args.class_weights,
         tsa_method=args.tsa_method,
+        val_size=0,
+        train_embeddings=True,
     )
 
     filename = args.data
@@ -230,6 +232,7 @@ if __name__ == "__main__":
         wandb.config.dataset = args.data.split('/')[-1]
         wandb.config.batch_ratio = args.batch_ratio
         wandb.config.data_usage = data_usage
+        wandb.config.algo = algo.lower()
         if args.train_steps:
             wandb.config.train_steps = args.train_steps
             wandb.config.real_train_steps = real_train_steps
@@ -260,7 +263,7 @@ if __name__ == "__main__":
                   Us=unlabeledX,
                   Y=trainY,
                   update_hook=hooks)
-    elif algo is None or algo is "roberta":
+    elif algo is None:
         print("Training baseline...")
         model = SequenceLabeler(base_model=base_model,
                           crf_sequence_labeling=config["crf_sequence_labeling"],
@@ -268,6 +271,9 @@ if __name__ == "__main__":
                           batch_size=config["batch_size"],
                           class_weights=config["class_weights"],
                           early_stopping_steps=None,
+                          tensorboard_folder="tensorboard/testing",
+                          val_interval=1,
+                          val_size=0,
                           low_memory_mode=config["low_memory_mode"])
         model.fit(trainX, trainY, update_hook=hooks)
     elif algo == "mlm":
