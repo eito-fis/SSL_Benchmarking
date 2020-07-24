@@ -74,6 +74,9 @@ if __name__ == "__main__":
     parser.add_argument('--tsa_method',
                      type=str2none,
                      default=None)
+    parser.add_argument('--random_bert',
+                        type=str2bool,
+                        default=False)
 
     parser.add_argument('--labeled_percent',
                      type=int,
@@ -136,6 +139,11 @@ if __name__ == "__main__":
                      type=float,
                      default=0.2)
 
+    # This exists for wandb to run the same hyperparams multiple times
+    parser.add_argument('--throwaway',
+                        type=int,
+                        default=None)
+
     args = parser.parse_args()
 
 
@@ -161,6 +169,9 @@ if __name__ == "__main__":
         val_size=0,
         train_embeddings=True,
     )
+    if args.random_bert:
+        config["base_model_path"] = "models/fresh_start.jl"
+        config["permit_uninitialized"] = ".*"
 
     filename = args.data
     with open(filename, mode="rb") as f:
@@ -265,16 +276,22 @@ if __name__ == "__main__":
                   update_hook=hooks)
     elif algo is None:
         print("Training baseline...")
-        model = SequenceLabeler(base_model=base_model,
-                          crf_sequence_labeling=config["crf_sequence_labeling"],
-                          n_epochs=config["n_epochs"],
-                          batch_size=config["batch_size"],
-                          class_weights=config["class_weights"],
-                          early_stopping_steps=None,
-                          tensorboard_folder="tensorboard/testing",
-                          val_interval=1,
-                          val_size=0,
-                          low_memory_mode=config["low_memory_mode"])
+        _config = dict(
+            base_model=base_model,
+            crf_sequence_labeling=config["crf_sequence_labeling"],
+            n_epochs=config["n_epochs"],
+            batch_size=config["batch_size"],
+            class_weights=config["class_weights"],
+            early_stopping_steps=None,
+            tensorboard_folder="tensorboard/testing",
+            val_interval=1,
+            val_size=0,
+            low_memory_mode=config["low_memory_mode"],
+        )
+        if args.random_bert:
+            _config["base_model_path"] = "models/fresh_start.jl"
+            _config["permit_uninitialized"] = ".*"
+        model = SequenceLabeler(**_config)
         model.fit(trainX, trainY, update_hook=hooks)
     elif algo == "mlm":
         print("Training Masked Language Model...")
