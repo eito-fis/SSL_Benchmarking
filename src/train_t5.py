@@ -7,17 +7,13 @@ from finetune.base_models.huggingface.models import HFT5
 from finetune.target_models.seq2seq import HFS2S
 import textdistance
 import re
+from itertools import permutations
 
 from finetune import SequenceLabeler, MaskedLanguageModel
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
 
-METRIC_FUNCS = {}
-def metric_func(name):
-    def wrapper(func):
-        METRIC_FUNCS[name] = func
-        return func
-    return wrapper
+from util import METRIC_FUNCS, ASSOCIATION_FUNCS
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -33,59 +29,6 @@ def str2none(v):
     if v is None or v.lower() == "none":
         return None
     return v
-@metric_func("reconstruction")
-def get_reconstruction_metrics(preds, labels, **kwargs):
-    distances = []
-    similarities = []
-    for pred, label in zip(preds, labels):
-        distances.append(textdistance.levenshtein.normalized_distance(pred, label))
-        similarities.append(textdistance.levenshtein.normalized_similarity(pred, label))
-    distances = np.array(distances)
-    similarities = np.array(similarities)
-    ret_dict = {
-        "Mean Distance": np.mean(distances),
-        "Median Distance": np.median(distances),
-        "Std Deviation Distance": np.std(distances),
-        "Mean Similarity": np.mean(similarities),
-        "Median Similarity": np.median(similarities),
-        "Std Deviation Similarity": np.std(similarities),
-    }
-    return ret_dict, None
-
-@metric_func("extraction")
-def get_extraction_metrics(preds, labels, delim=" | ", **kwargs):
-    true_pos, false_pos, false_neg, total = 0, 0, 0, 0
-    error_indicies = []
-    for i, (pred, label) in enumerate(zip(preds, labels)):
-        # Normalize punctuation
-        label = re.sub(" ([.?!:;,])", "\\1", label)
-        pred = re.sub(" ([.?!:;,])", "\\1", pred)
-
-        set_labels = set(label.split(delim))
-        set_preds = set(pred.split(delim))
-
-        # True postive = tokens in labels and preds
-        # False positive = tokens in preds but not in labels
-        # False negative = tokens in labels but not in preds
-        overlap = set_labels & set_preds
-        only_preds = set_preds - overlap
-        only_labels = set_labels - overlap
-        true_pos += len(overlap)
-        false_pos += len(only_preds)
-        false_neg += len(only_labels)
-
-        if len(only_preds) > 0 or len(only_labels) > 0:
-            error_indicies.append(i)
-
-    precision = true_pos / (true_pos + false_pos)
-    recall = true_pos / (true_pos + false_neg)
-    f1 = 2 * (precision * recall) / (precision + recall)
-    ret_dict = {
-        "Precision": precision,
-        "Recall": recall,
-        "F1": f1,
-    }
-    return ret_dict, error_indicies
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Train SSL')
@@ -149,6 +92,9 @@ if __name__ == "__main__":
     parser.add_argument('--mode',
                         type=str,
                         default="extraction")
+    parser.add_argument('--extra_delim',
+                        type=str,
+                        default=None)
 
     parser.add_argument('--labeled_count',
                      type=int,
@@ -160,13 +106,30 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size',
                      type=int,
                      default=2)
+    parser.add_argument('--predict_batch_size',
+                     type=int,
+                     default=20)
+    parser.add_argument('--xla',
+                     type=str2bool,
+                     default=False)
     parser.add_argument('--beam_size',
                      type=int,
                      default=1)
+    parser.add_argument('--beam_alpha',
+                     type=float,
+                     default=0.2)
     args = parser.parse_args()
 
-
-
+    delim_tokens = None
+    if args.extra_delim:
+        delim_tokens = ["|", "ref-marker", "authors", "title", "venue", "data",
+                        "reference-id", "note", "web", "status", "language",
+                        "booktitle", "date", "address", "pages", "organization",
+                        "volume", "number", "pubisher", "editor", "tech",
+                        "institution", "series", "chapter", "thesis", "school",
+                        "department", "person", "person-first", "person-last",
+                        "person-middle", "person-affix", "year", "month", "journal"]
+        delim_tokens.append(args.extra_delim.split(" "))
     config = dict(
         crf_sequence_labeling = args.crf,
         n_epochs = args.epochs,
@@ -179,6 +142,10 @@ if __name__ == "__main__":
         tensorboard_folder="tensorboard/text_gen/",
         early_stopping_steps=None,
         beam_size=args.beam_size,
+        beam_search_alpha=args.beam_alpha,
+        predict_batch_size=args.predict_batch_size,
+        xla=args.xla,
+        delim_tokens=delim_tokens,
         # permit_uninitialized=".*",
     )
 
@@ -215,15 +182,6 @@ if __name__ == "__main__":
         testX = trainX
         testY = trainY
 
-    # If train steps are passed, convert to epochs for finetune
-    if args.train_steps:
-        steps_per_epoch = len(trainX)
-        n_epochs = round(args.train_steps / steps_per_epoch)
-        real_train_steps = int(steps_per_epoch) * n_epochs
-        print(f"{args.train_steps} trains steps became {n_epochs} epochs")
-        print(f"Actual train steps: {real_train_steps}")
-        config["n_epochs"] = n_epochs
-
     if args.wandb:
         import wandb
         from wandb.tensorflow import WandbHook
@@ -240,7 +198,6 @@ if __name__ == "__main__":
     else:
         hooks = None
 
-
     arg_base_model = None if not args.base_model else args.base_model.lower()
     if arg_base_model == "t5":
         print("T5 selected!")
@@ -252,7 +209,12 @@ if __name__ == "__main__":
         algo = SequenceLabeler
 
     if args.load:
-        model = algo.load(args.load)
+        model = algo.load(args.load,
+                          predict_batch_size=args.predict_batch_size,
+                          xla=args.xla,
+                          delim_tokens=delim_tokens,
+                          beam_size=args.beam_size,
+                          beam_search_alpha=args.beam_alpha)
         print(f"Model loaded from {args.load}")
     else:
         model = algo(base_model=base_model, **config)
@@ -265,6 +227,17 @@ if __name__ == "__main__":
         print(f"Model saved to {args.save}")
 
 
+    # encoded_x = model.input_pipeline.text_encoder._encode([trainX[0]])[0][0]
+    # encoded_y = model.input_pipeline.text_encoder._encode([trainY[0]])[0][0]
+    # print(f"Input: {trainX[0]}")
+    # print(f"Encoded Input: {encoded_x}")
+    # print(f"Label: {trainY[0]}")
+    # print(f"Encoded Label: {encoded_y}")
+    # input()
+    # for c, v in zip(trainY[0].split(), encoded_y):
+    #     print(c)
+    #     print(v)
+    #     input()
     predictions = model.predict(testX)
     if arg_base_model == "roberta":
         # def process_preds(preds):
@@ -308,10 +281,10 @@ if __name__ == "__main__":
         print("Label: ", a)
         print("==" * 20)
 
-    metrics, error_indicies = METRIC_FUNCS[mode](preds, labels, delim=" | ")
+    metrics, error_indicies = METRIC_FUNCS[args.mode](predictions, testY, delim="\\|")
     print("\n\n")
     for key, value in metrics.items():
-        print(f"{metric}: {value}")
+        print(f"{key}: {value}")
         if args.wandb:
             wandb.run.summary[key] = value
     print("\n\n")
