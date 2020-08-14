@@ -30,6 +30,14 @@ def str2none(v):
         return None
     return v
 
+def nice_print(i, p, l):
+    print("Text: ", i)
+    print("-" * 20)
+    print("Predictions: ", p)
+    print("-" * 20)
+    print("Label: ", l)
+    print("==" * 20)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Train SSL')
     parser.add_argument('--data',
@@ -226,18 +234,6 @@ if __name__ == "__main__":
         model.save(args.save)
         print(f"Model saved to {args.save}")
 
-
-    # encoded_x = model.input_pipeline.text_encoder._encode([trainX[0]])[0][0]
-    # encoded_y = model.input_pipeline.text_encoder._encode([trainY[0]])[0][0]
-    # print(f"Input: {trainX[0]}")
-    # print(f"Encoded Input: {encoded_x}")
-    # print(f"Label: {trainY[0]}")
-    # print(f"Encoded Label: {encoded_y}")
-    # input()
-    # for c, v in zip(trainY[0].split(), encoded_y):
-    #     print(c)
-    #     print(v)
-    #     input()
     if args.cached_predict:
         with open(args.cached_predict, "rb") as f:
             prediction, testY = pickle.load(f)
@@ -250,47 +246,10 @@ if __name__ == "__main__":
         with open("data/predictions/predictions.pickle", "wb") as f:
             pickle.dump(save_dic, f)
 
-    if arg_base_model == "roberta":
-        # def process_preds(preds):
-        #     text = [p["text"].split(" ") for p in preds]
-        #     flat_text = [_t for t in text for _t in t]
-        #     return " | ".join(flat_text)
-        from nameparser import HumanName
-        def process_preds(labels):
-            _l = len(labels)
-            i = 0
-            _names = []
-            while (i < len(labels)):
-                if labels[i]["label"] == "B-PER":
-                    start = i
-                    i += 1
-                    while (i < len(labels) and labels[i]["label"] == "I-PER"):
-                        i += 1
-                    sub_name = " ".join([l["text"] for l in labels[start:i]])
-                    name = HumanName(sub_name)
-                    if name.first:
-                        if name.last:
-                            _names.append(", ".join((name.last, name.first)))
-                        else:
-                            _names.append(name.first)
-                else:
-                    i += 1
-            concat = " | ".join(_names)
-            return concat
-
-        predictions = list(map(process_preds, predictions))
-        testY = list(map(process_preds, testY))
-
     cut = 20
-    print(f"FIRST {cut} EXAMPLES")
-    print("=" * 40)
-    for t, p, a in zip(testX[:cut], predictions[:cut], testY[:cut]):
-        print("Text: ", t)
-        print("-")
-        print("Predictions: ", p)
-        print("-")
-        print("Label: ", a)
-        print("==" * 20)
+    print("HEAD\n" + "=" * 40)
+    for i, p, l in zip(testX[:cut], predictions[:cut], testY[:cut]):
+        nice_print(i, p, a)
 
     metrics, error_indicies = METRIC_FUNCS[args.mode](predictions, testY, delim="\\|")
     print("\n\n")
@@ -302,17 +261,11 @@ if __name__ == "__main__":
 
     if args.errors:
         if error_indicies:
-            print(f"{len(error_indicies)} ERRORS")
-            print("=" * 40)
+            print(f"{len(error_indicies)} ERRORS\n" + "=" * 40)
         else:
             error_indicies = range(len(testX))
         step = None
         for i in error_indicies:
-            print("Text: ", testX[i])
-            print("-")
-            print("Predictions: ", predictions[i])
-            print("-")
-            print("Label: ", testY[i])
-            print("==" * 20)
+            nice_print(testX[i], predictions[i], testY[i])
             if not step:
                 step = input()
