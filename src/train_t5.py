@@ -238,7 +238,18 @@ if __name__ == "__main__":
     #     print(c)
     #     print(v)
     #     input()
-    predictions = model.predict(testX)
+    if args.cached_predict:
+        with open(args.cached_predict, "rb") as f:
+            prediction, testY = pickle.load(f)
+    else:
+        predictions = model.predict(testX)
+        save_dic = {
+            "pred": predictions,
+            "textY": testY
+        }
+        with open("data/predictions/predictions.pickle", "wb") as f:
+            pickle.dump(save_dic, f)
+
     if arg_base_model == "roberta":
         # def process_preds(preds):
         #     text = [p["text"].split(" ") for p in preds]
