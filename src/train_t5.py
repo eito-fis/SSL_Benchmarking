@@ -104,13 +104,6 @@ if __name__ == "__main__":
                         type=str,
                         default=None)
 
-    parser.add_argument('--labeled_count',
-                     type=int,
-                     default=None,
-                     help="""The number of labeled examples to be used.
-                     (default: None)""")
-
-
     parser.add_argument('--batch_size',
                      type=int,
                      default=2)
@@ -130,6 +123,7 @@ if __name__ == "__main__":
 
     delim_tokens = None
     if args.extra_delim:
+        # TODO: Make this a constant tied to dataset in another file
         delim_tokens = ["|", "ref-marker", "authors", "title", "venue", "data",
                         "reference-id", "note", "web", "status", "language",
                         "booktitle", "date", "address", "pages", "organization",
@@ -138,6 +132,7 @@ if __name__ == "__main__":
                         "department", "person", "person-first", "person-last",
                         "person-middle", "person-affix", "year", "month", "journal"]
         delim_tokens.append(args.extra_delim.split(" "))
+
     config = dict(
         crf_sequence_labeling = args.crf,
         n_epochs = args.epochs,
@@ -154,7 +149,6 @@ if __name__ == "__main__":
         predict_batch_size=args.predict_batch_size,
         xla=args.xla,
         delim_tokens=delim_tokens,
-        # permit_uninitialized=".*",
     )
 
     filename = args.data
@@ -175,20 +169,6 @@ if __name__ == "__main__":
             test_size=0.2,
             random_state=42
         )
-
-    # If number of labeled examples are specific, cut down the dataset to size
-    if args.labeled_count:
-        data_usage = (args.labeled_count / len(trainX)) * 100
-        split = 1 - data_usage / 100
-        if split > 0.0:
-            trainX, _, trainY, _ = train_test_split(
-                trainX,
-                trainY,
-                test_size=split,
-                random_state=42
-            )
-        testX = trainX
-        testY = trainY
 
     if args.wandb:
         import wandb
@@ -216,28 +196,24 @@ if __name__ == "__main__":
         base_model = RoBERTa
         algo = SequenceLabeler
 
-    if args.load:
-        model = algo.load(args.load,
-                          predict_batch_size=args.predict_batch_size,
-                          xla=args.xla,
-                          delim_tokens=delim_tokens,
-                          beam_size=args.beam_size,
-                          beam_search_alpha=args.beam_alpha)
-        print(f"Model loaded from {args.load}")
-    else:
-        model = algo(base_model=base_model, **config)
-        print("Model built!")
-    if args.train:
-        print("Training...")
-        model.fit(trainX, trainY, update_hook=hooks)
-    if args.save:
-        model.save(args.save)
+    if not args.cached_predict:
+        if args.load:
+            model = algo.load(args.load,
+                              predict_batch_size=args.predict_batch_size,
+                              xla=args.xla,
+                              delim_tokens=delim_tokens,
+                              beam_size=args.beam_size,
+                              beam_search_alpha=args.beam_alpha)
+            print(f"Model loaded from {args.load}")
+        else:
+            model = algo(base_model=base_model, **config)
+            print("Model built!")
+        if args.train:
+            print("Training...")
+            model.fit(trainX, trainY, update_hook=hooks)
+        if args.save:
+            model.save(args.save)
         print(f"Model saved to {args.save}")
-
-    if args.cached_predict:
-        with open(args.cached_predict, "rb") as f:
-            prediction, testY = pickle.load(f)
-    else:
         predictions = model.predict(testX)
         save_dic = {
             "pred": predictions,
@@ -245,6 +221,9 @@ if __name__ == "__main__":
         }
         with open("data/predictions/predictions.pickle", "wb") as f:
             pickle.dump(save_dic, f)
+    else:
+        with open(args.cached_predict, "rb") as f:
+            prediction, testY = pickle.load(f)
 
     cut = 20
     print("HEAD\n" + "=" * 40)
