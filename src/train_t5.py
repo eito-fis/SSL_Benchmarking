@@ -13,7 +13,7 @@ from finetune import SequenceLabeler, MaskedLanguageModel
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
 
-from util import METRIC_FUNCS, ASSOCIATION_FUNCS
+from util import METRIC_FUNCS, ASSOCIATION_FUNCS, PROCESS_RULES
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -45,6 +45,9 @@ if __name__ == "__main__":
                      default="data/CONLL-2003/processed.pickle",
                      help="""Pickle file to load data from. (default:
                      data/CONLL-2003/processed.pickle""")
+    parser.add_argument('--cached_predict',
+                     type=str,
+                     default=None)
     parser.add_argument('--wandb',
                      type=str2bool,
                      default=False,
@@ -100,6 +103,9 @@ if __name__ == "__main__":
     parser.add_argument('--mode',
                         type=str,
                         default="extraction")
+    parser.add_argument('--association_mode',
+                        type=str,
+                        default=None)
     parser.add_argument('--extra_delim',
                         type=str,
                         default=None)
@@ -215,22 +221,33 @@ if __name__ == "__main__":
             model.save(args.save)
         print(f"Model saved to {args.save}")
         predictions = model.predict(testX)
-        save_dic = {
+        save_dict = {
             "pred": predictions,
             "textY": testY
         }
-        with open("data/predictions/predictions.pickle", "wb") as f:
-            pickle.dump(save_dic, f)
+        predict_filename = "data/predictions/predictions.pickle"
+        with open(predict_filename, "wb") as f:
+            pickle.dump(save_dict, f)
+        print(f"Predictions cached at {predict_filename}!")
     else:
         with open(args.cached_predict, "rb") as f:
-            prediction, testY = pickle.load(f)
+            save_dict = pickle.load(f)
+            predictions, testY = save_dict["pred"], save_dict["textY"]
+
+    replacements = PROCESS_RULES[args.association_mode]
+    for repl in replacements:
+        process_fn = lambda x: re.sub(repl[0], repl[1], x)
+        predictions = list(map(process_fn, predictions))
+        testY = list(map(process_fn, testY))
 
     cut = 20
     print("HEAD\n" + "=" * 40)
     for i, p, l in zip(testX[:cut], predictions[:cut], testY[:cut]):
-        nice_print(i, p, a)
+        nice_print(i, p, l)
 
-    metrics, error_indicies = METRIC_FUNCS[args.mode](predictions, testY, delim="\\|")
+    metrics, error_indicies = METRIC_FUNCS[args.mode](predictions, testY,
+                                                      delim="\\|",
+                                                      association_mode=args.association_mode)
     print("\n\n")
     for key, value in metrics.items():
         print(f"{key}: {value}")

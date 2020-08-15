@@ -3,6 +3,14 @@ import textdistance
 import re
 from itertools import permutations
 
+PROCESS_RULES = {
+    "original": [(r"(<) ", r"\1")],
+    "json": [],
+    "newline": [(r"({) ", r"\1"), (r"} }", "}}"), (r"{", "\n"), (r"}", "\t"),
+                (r" \| ", "\n|\n")],
+    None: [],
+}
+
 METRIC_FUNCS = {}
 def metric_func(name):
     def wrapper(func):
@@ -18,7 +26,9 @@ def association_func(name):
     return wrapper
 
 def calc_f1(tp, fp, fn):
-    assert tp and fp, "No positive labels found!"
+    if tp + fp == 0:
+        print("No positive labels predicted!")
+        return 0, 0, 0
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)
     if recall and precision:
@@ -27,8 +37,8 @@ def calc_f1(tp, fp, fn):
         f1 = 0
     return precision, recall, f1
 
-def calc_postive_negative(l, p):
-    # True postive = tokens in labels and preds
+def calc_positive_negative(l, p):
+    # True positive = tokens in labels and preds
     # False negative = tokens in labels but not in preds
     # False positive = tokens in preds but not in labels
     set_l, set_p = set(l), set(p)
@@ -36,9 +46,18 @@ def calc_postive_negative(l, p):
     only_l = set_l - overlap
     only_p = set_p - overlap
     tp, fp, fn = len(overlap), len(only_p), len(only_l)
-    # _, _, f1 = calc_f1(tp, fp, fn)
-    # return (tp, fp, fn), f1
-    return (tp, fp, fn)
+    return tp, fp, fn
+
+def check_level(splits, i):
+    j = i + 1
+    while j < len(splits):
+        if len(splits[j]) > 2 and splits[j][0] == "<":
+            if splits[j][1] == "/":
+                return False
+            else:
+                return True
+        j += 1
+    return True
 
 @metric_func("reconstruction")
 def get_reconstruction_metrics(preds, labels, **kwargs):
@@ -63,8 +82,8 @@ def get_extraction_metrics(preds, labels, **kwargs):
         label = re.sub(" ([.?!:;,])", "\\1", label)
         pred = re.sub(" ([.?!:;,])", "\\1", pred)
 
-        split_labels = set([s.strip() for s in label.split(delim)])
-        split_preds = set([s.strip() for s in pred.split(delim)])
+        split_labels = [s.strip() for s in label.split(delim)]
+        split_preds = [s.strip() for s in pred.split(delim)]
 
         tp, fp, fn = calc_positive_negative(split_labels, split_preds)
         true_pos += tp
@@ -79,6 +98,44 @@ def get_extraction_metrics(preds, labels, **kwargs):
         "Recall": recall,
         "F1": f1,
     }
+    return ret_dict, error_indicies
+
+@metric_func("association")
+def get_association_metrics(preds, labels, **kwargs):
+    mode = kwargs.get("association_mode", "json")
+    delim = kwargs.get("delim", r"\|")
+
+    all_stats = []
+    for i, (pred, label) in enumerate(zip(preds, labels)):
+        # Normalize punctuation
+        label = re.sub(" ([.?!:;,])", r"\1", label)
+        pred = re.sub(" ([.?!:;,])", r"\1", pred)
+        
+        # text -> ((tags,), extracted text) tuples
+        processed_labels = [ASSOCIATION_FUNCS[mode](s.strip())
+                            for s in re.split(delim, label)]
+        processed_preds = [ASSOCIATION_FUNCS[mode](s.strip())
+                           for s in re.split(delim, pred)]
+
+        stats = [calc_positive_negative(l, p)
+                 for l, p in zip(processed_labels, processed_preds)]
+        final_stats = tuple(sum(s) for s in zip(*stats))
+        if final_stats:
+            all_stats.append(final_stats)
+
+    all_stats = tuple(sum(s) for s in zip(*all_stats))
+    precision, recall, f1 = calc_f1(*all_stats)
+    ret_dict = {
+        "Token Precision": precision,
+        "Token Recall": recall,
+        "Token F1": f1
+    }
+
+    extraction_dict, error_indicies = get_extraction_metrics(preds, labels, delim=" | ")
+    ret_dict.update(extraction_dict)
+    reconstruction_dict, _ = get_reconstruction_metrics(preds, labels, **kwargs)
+    ret_dict.update(reconstruction_dict)
+
     return ret_dict, error_indicies
 
 @association_func("json")
@@ -113,55 +170,67 @@ def process_json(x):
         start = i
     return text
 
-@metric_func("association")
-def get_association_metrics(preds, labels, **kwargs):
-    mode = kwargs.get("association_mode", "json")
-    delim = kwargs.get("delim", "\\|")
-    all_stats = []
-    for i, (pred, label) in enumerate(zip(preds, labels)):
-        # Normalize punctuation
-        label = re.sub(" ([.?!:;,])", "\\1", label)
-        pred = re.sub(" ([.?!:;,])", "\\1", pred)
-        
-        # text -> (tags, extracted text) tuples
-        processed_labels = [ASSOCIATION_FUNCS[mode](s.strip())
-                            for s in re.split(delim, label)]
-        processed_preds = [ASSOCIATION_FUNCS[mode](s.strip())
-                           for s in re.split(delim, pred)]
+@association_func("original")
+def process_original(x):
+    closed = False
+    text = []
+    stack = []
+    filter_fn = lambda x: True if x and x != " " else False
+    splits = list(filter(filter_fn, re.split("(<[^>]*>)", x)))
+    for i in range(len(splits)):
+        token = splits[i]
+        if len(token) > 2 and token[0] == "<":
+            if token[1] == "/":
+                # Closing tag
+                closed = True
+                tag = token[2:-1]
+                if len(stack) == 0:
+                    print(f"Warning! No tags on stack when closing!")
+                elif tag != stack[-1]:
+                    print(f"Warning! Tag does not match stack!")
+                else:
+                    stack.pop()
+            else:
+                # Opening tag
+                closed = False
+                tag = token[1:-1]
+                stack.append(tag)
+                high_level = check_level(splits, i)
+        elif len(token) > 0:
+            # Word found
+            token = re.sub(" ([.?!:;,])", "\\1", token)
+            if len(stack) == 0 or closed or high_level:
+                    continue
+            text.append((tuple(s for s in stack), token.strip()))
+    return text
 
-        best_f1 = 0
-        best_stats = []
-        # perms = list(permutations(processed_preds))
-        # perms = [processed_preds]
-        # cap = 1000
-        # if len(perms) > cap:
-        #     perms = random.choice(perms, k=cap)
-        # for perm_preds in perms:
-        #     stats = [compare(l, p)
-        #              for l, p in zip(processed_labels, perm_preds)]
-        #     avg_f1 = sum(s[1] for s in stats) / len(stats)
-        #     if avg_f1 > best_f1:
-        #         best_f1 = avg_f1
-        #         best_stats = stats
-        # # print(best_stats)
-        # # print(best_f1)
-        # # input()
-        stats = [calc_positive_negative(l, p)
-                 for l, p in zip(processed_labels, processed_preds)]
-        # stats = [s[0] for s in best_stats]
-        final_stats = tuple(sum(s) for s in zip(*stats))
-        if final_stats:
-            all_stats.append(final_stats)
-    all_stats = tuple(sum(s) for s in zip(*all_stats))
-    precision, recall, f1 = calc_f1(*all_stats)
+@association_func("newline")
+def process_newline(x):
+    closed = False
+    details = []
+    stack = []
+    i = 0
+    while i != -1 and i < len(x):
+        end = x.find("\n", i + 1)
+        if end == -1:
+            span = x[i:]
+        else:
+            span = x[i:end]
 
-    ret_dict = {
-        "Token Precision": precision,
-        "Token Recall": recall,
-        "Token F1": f1
-    }
-    extraction_dict, error_indicies = get_extraction_metrics(preds, labels, delim=" | ")
-    ret_dict.update(extraction_dict)
-    reconstruction_dict, _ = get_reconstruction_metrics(preds, labels, **kwargs)
-    ret_dict.update(reconstruction_dict)
-    return ret_dict, error_indicies
+        text_start = re.search(r"[^\n\t]", span)
+        if not text_start:
+            print("Warning! New detail started at end of prediction")
+        else:
+            text_start = text_start.start()
+
+        prefix = span[:text_start]
+        num_tab = len(re.findall("\t", prefix))
+        stack = stack[:num_tab]
+
+        text = span[text_start:].split(" < ")
+        tag = text[0].strip()
+        stack.append(tag)
+        if len(text) == 2:
+            details.append((tuple(s for s in stack), text[1].strip()))
+        i = end
+    return details
