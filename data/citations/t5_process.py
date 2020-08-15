@@ -126,27 +126,28 @@ def process_newline(line):
                 # Opening tag
                 closed = False
                 tag = token[1:-1]
+                prefix = " {" + ("}" * len(stack)) + " "
+                entity = entity + (prefix if len(entity) else "") + tag
                 stack.append(tag)
-                tabs = "}" * len(stack)
-                entity = entity + ("{" if len(entity) else "") + tag
                 high_level = check_level(splits, i)
+                if not high_level:
+                    entity += " < "
         elif len(token) > 0:
             # Word found
             # Label with all tags active in stack
-            token = re.sub(" ([.?!:;,])", "\\1", token)
+            token = re.sub(" ([.?!:;,])", "\\1", token).strip()
             sentence.append(token)
             if len(entity) == 0 or len(stack) == 0 or closed or high_level:
                 continue
             entity += token
-    return "| ".join(entities), " ".join(sentence)
+    return " | ".join(entities), " ".join(sentence)
 
 def read_file(filename, mode="equals", debug=False):
     with open(filename, mode="rt") as f:
         mode2func = {
-            "equals": process_equals,
             "json": process_json,
-            "custom": process_custom,
             "original": process_original,
+            "newline": process_newline,
         }
         all_entities = []
         inputs = []
@@ -194,7 +195,9 @@ if __name__ == "__main__":
     _in = None
     for i, l in zip(inputs, labels):
         print(f"Input: {i}")
-        print(f"Label: {l}")
+        # _l = l.replace("{", "\n").replace("}", "\t")
+        # print(f"Label:\n{_l}")
+        print(f"Label:\n{l}")
         print("=" * 20)
         if not _in:
             _in = input()
