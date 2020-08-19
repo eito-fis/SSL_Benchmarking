@@ -13,7 +13,7 @@ from finetune import SequenceLabeler, MaskedLanguageModel
 from finetune.base_models import RoBERTa, TCN
 from finetune.util.metrics import annotation_report, sequence_f1
 
-from util import METRIC_FUNCS, ASSOCIATION_FUNCS, PROCESS_RULES
+from util import METRIC_FUNCS, ASSOCIATION_FUNCS, PROCESS_RULES, ALLOWED_TOKENS
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -102,13 +102,13 @@ if __name__ == "__main__":
                         default=True)
     parser.add_argument('--mode',
                         type=str,
-                        default="extraction")
+                        default="association")
     parser.add_argument('--association_mode',
                         type=str,
                         default=None)
-    parser.add_argument('--extra_delim',
-                        type=str,
-                        default=None)
+    parser.add_argument('--constrain',
+                        default=False,
+                        action="store_true")
 
     parser.add_argument('--batch_size',
                      type=int,
@@ -128,16 +128,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     delim_tokens = None
-    if args.extra_delim:
-        # TODO: Make this a constant tied to dataset in another file
-        delim_tokens = ["|", "ref-marker", "authors", "title", "venue", "data",
-                        "reference-id", "note", "web", "status", "language",
-                        "booktitle", "date", "address", "pages", "organization",
-                        "volume", "number", "pubisher", "editor", "tech",
-                        "institution", "series", "chapter", "thesis", "school",
-                        "department", "person", "person-first", "person-last",
-                        "person-middle", "person-affix", "year", "month", "journal"]
-        delim_tokens.append(args.extra_delim.split(" "))
+    if args.constrain:
+        print(f"{args.association_mode} style constraint tokens")
+        delim_tokens = ALLOWED_TOKENS[args.association_mode]
 
     config = dict(
         crf_sequence_labeling = args.crf,
@@ -214,12 +207,47 @@ if __name__ == "__main__":
         else:
             model = algo(base_model=base_model, **config)
             print("Model built!")
+
+        ### CHECKING CONSTRAINTS ###
+        # text_encoder = model.input_pipeline.text_encoder
+        # encoded_delim = text_encoder._encode(delim_tokens)
+        # delim_tokens = encoded_delim[1]
+        # delim_tokens = [x for l in delim_tokens for x in l]
+        # encoded_delim = encoded_delim[0]
+        # encoded_delim = [x for l in encoded_delim for x in l]
+        # encoded_delim.append(text_encoder.end_token)
+        # print(encoded_delim)
+        # print(delim_tokens)
+        # for i, l in zip(trainX, trainY):
+        #     print(f"Input: {i}")
+        #     print(f"Label: {l}")
+        #     encoded_input = text_encoder._encode([i])
+        #     input_tokens = encoded_input[1][0]
+        #     encoded_input = encoded_input[0][0]
+        #     encoded_input.extend(encoded_delim)
+        #     encoded_label = text_encoder._encode([l])
+        #     label_tokens = encoded_label[1][0]
+        #     encoded_label = encoded_label[0][0]
+        #     set_input = set(encoded_input)
+        #     set_label = set(encoded_label)
+        #     print()
+        #     print(encoded_input)
+        #     print(input_tokens)
+        #     print(encoded_label)
+        #     print(label_tokens)
+        #     only_label  = set_label - set_input
+        #     print(f"Only in label: {only_label}")
+        #     missing = text_encoder.tokenizer.convert_ids_to_tokens(list(only_label))
+        #     print(f"Missing: {missing}")
+        #     assert len(only_label) == 0
+        # input()
+
         if args.train:
             print("Training...")
             model.fit(trainX, trainY, update_hook=hooks)
         if args.save:
             model.save(args.save)
-        print(f"Model saved to {args.save}")
+            print(f"Model saved to {args.save}")
         predictions = model.predict(testX)
         save_dict = {
             "pred": predictions,

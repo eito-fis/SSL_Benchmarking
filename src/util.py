@@ -11,6 +11,43 @@ PROCESS_RULES = {
     None: [],
 }
 
+ALLOWED_TOKENS = {
+    "json": ["|", "ref-marker", "authors", "title", "venue", "data",
+             "reference-id", "reference_id", "note", "web", "status",
+             "language", "booktitle", "date", "address", "pages",
+             "organization", "volume", "number", "publisher", "editor", "tech",
+             "institution", "series", "chapter", "thesis", "school",
+             "department", "person", "person-first", "person-last",
+             "person-middle", "person-affix", "year", "month", "journal",
+             "edition", "length", "category", "subtitle", "{", "}", ",", "},"],
+    "newline": ["|", "ref-marker", "authors", "title", "venue", "data",
+                "reference-id", "reference_id", "note", "web", "status",
+                "language", "booktitle", "date", "address", "pages",
+                "organization", "volume", "number", "publisher", "editor",
+                "tech", "institution", "series", "chapter", "thesis", "school",
+                "department", "person", "person-first", "person-last",
+                "person-middle", "person-affix", "year", "month", "journal",
+                "edition", "length", "category", "subtitle", "{", "}", "<"],
+    # Yikes
+    "original": ["|", "ref-marker", "authors", "title", "venue", "data",
+                 "reference-id", "reference_id", "note", "web", "status",
+                 "language", "booktitle", "date", "address", "pages",
+                 "organization", "volume", "number", "publisher", "editor",
+                 "tech", "institution", "series", "chapter", "thesis",
+                 "school", "department", "person", "person-first",
+                 "person-last", "person-middle", "person-affix", "year",
+                 "month", "journal", "edition", "length", "category",
+                 "subtitle", "/ref-marker", "/authors", "/title", "/venue",
+                 "/data", "/reference-id", "/reference_id", "/note", "/web",
+                 "/status", "/language", "/booktitle", "/date", "/address",
+                 "/pages", "/organization", "/volume", "/number", "/publisher",
+                 "/editor", "/tech", "/institution", "/series", "/chapter",
+                 "thesis", "school", "/department", "/person", "/person-first",
+                 "/person-last", "/person-middle", "/person-affix", "/year",
+                 "/month", "/journal", "/edition", "/length", "/category",
+                 "/subtitle", "/thesis", "/school", "<", ">", "/", "</", "/>"],
+}
+
 METRIC_FUNCS = {}
 def metric_func(name):
     def wrapper(func):
