@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--base_model',
                      type=str,
-                     default="roberta",
+                     default="t5",
                      help="""What basemodel to train. Current options are
                      (RoBERTa, T5).  Unrecognized strs or None trains a
                      RoBERTa model. (default: None)""")
@@ -86,11 +86,6 @@ if __name__ == "__main__":
                      type=int,
                      default=2,
                      help="Epochs to train for. (default: 2)")
-    parser.add_argument('--train_steps',
-                     type=int,
-                     default=None,
-                     help="""The amount of training steps to take. Takes
-                        precedent over epochs if set. (default: None)""")
     parser.add_argument('--load',
                         type=str,
                         default=None)
@@ -178,9 +173,6 @@ if __name__ == "__main__":
              config=config)
         wandb.config.dataset = args.data.split('/')[-1]
         wandb.config.basemodel = args.base_model
-        if args.train_steps:
-            wandb.config.train_steps = args.train_steps
-            wandb.config.real_train_steps = real_train_steps
         hooks = WandbHook
     else:
         hooks = None

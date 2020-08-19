@@ -5,6 +5,7 @@ from itertools import permutations
 
 PROCESS_RULES = {
     "original": [(r"(<) ", r"\1")],
+    "not_original": [(r"(<) ", r"\1")],
     "json": [],
     "newline": [(r"({) ", r"\1"), (r"} }", "}}"), (r"{", "\n"), (r"}", "\t"),
                 (r" \| ", "\n|\n")],
@@ -46,6 +47,15 @@ ALLOWED_TOKENS = {
                  "/person-last", "/person-middle", "/person-affix", "/year",
                  "/month", "/journal", "/edition", "/length", "/category",
                  "/subtitle", "/thesis", "/school", "<", ">", "/", "</", "/>"],
+    "not_original": ["|", "ref-marker", "authors", "title", "venue", "data",
+                     "reference-id", "reference_id", "note", "web", "status",
+                     "language", "booktitle", "date", "address", "pages",
+                     "organization", "volume", "number", "publisher", "editor",
+                     "tech", "institution", "series", "chapter", "thesis",
+                     "school", "department", "person", "person-first",
+                     "person-last", "person-middle", "person-affix", "year",
+                     "month", "journal", "edition", "length", "category",
+                     "subtitle", "<", ">", "/", "</", "/>"],
 }
 
 METRIC_FUNCS = {}
@@ -221,6 +231,40 @@ def process_original(x):
                 # Closing tag
                 closed = True
                 tag = token[2:-1]
+                if len(stack) == 0:
+                    print(f"Warning! No tags on stack when closing!")
+                elif tag != stack[-1]:
+                    print(f"Warning! Tag does not match stack!")
+                else:
+                    stack.pop()
+            else:
+                # Opening tag
+                closed = False
+                tag = token[1:-1]
+                stack.append(tag)
+                high_level = check_level(splits, i)
+        elif len(token) > 0:
+            # Word found
+            token = re.sub(" ([.?!:;,])", "\\1", token)
+            if len(stack) == 0 or closed or high_level:
+                    continue
+            text.append((tuple(s for s in stack), token.strip()))
+    return text
+
+@association_func("not_original")
+def process_original(x):
+    closed = False
+    text = []
+    stack = []
+    filter_fn = lambda x: True if x and x != " " else False
+    splits = list(filter(filter_fn, re.split("(<[^>]*>)", x)))
+    for i in range(len(splits)):
+        token = splits[i]
+        if len(token) > 2 and token[0] == "<":
+            if token[1] == "/":
+                # Closing tag
+                closed = True
+                tag = token[3:-1]
                 if len(stack) == 0:
                     print(f"Warning! No tags on stack when closing!")
                 elif tag != stack[-1]:
